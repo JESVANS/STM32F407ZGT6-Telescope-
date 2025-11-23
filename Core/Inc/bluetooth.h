@@ -67,14 +67,33 @@ BT_Status_t BT_Send(BT_Handle_t *hbt, const uint8_t *data, uint16_t len, uint32_
 /* 阻塞接收透传数据（简易版本，直接调用 HAL 阻塞接收） */
 BT_Status_t BT_Receive(BT_Handle_t *hbt, uint8_t *buf, uint16_t len, uint32_t timeout_ms);
 
-/* 发送 AT 指令：
-   流程：拉高 EN→延时→发送命令→等待响应→拉低 EN
-   resp_buf 可为 NULL；timeout_ms 超时；返回 BT_OK/BT_TIMEOUT */
-BT_Status_t BT_SendAT(BT_Handle_t *hbt, const char *cmd,
-                      char *resp_buf, uint16_t resp_len, uint32_t timeout_ms);
-
 /* 读取连接状态（直接读 STATE 引脚） */
 BT_ConnState_t BT_GetState(BT_Handle_t *hbt);
+
+/*
+!!注意!!
+BT_SendAT已不再使用, 需要发送AT指令时 可直接在 蓝牙断开连接 的情况下使用BT_Send发送"AT+......"
+连接状态下直接发送"AT+DISC\r\n"可使模块断开连接
+*/
+/*AT+VERSION 查询版本 
+    AT+RESET    复位 
+    AT+DISC    断开连接
+    AT+LADDR    查询MAC地址
+    AT+BAUD<Param>  AT+BAUD    波特率设置/查询 Param:4=9600,5=19200,6=38400,7=57600,8=115200,9=128000
+    AT+PIN<Param>  AT+PIN    蓝牙配对密码设置/查询 Param:4位数字密码，如 AT+PIN1234
+    AT+NAME<Param>  AT+NAME    广播名设置/查询  Param: BLE 广播名(最长:18字节) ，如 AT+NAMEMyBTDevice
+    AT+ENLOG<Param>  AT+ENLOG    串口状态输出使能设置/查询  1:打开串口状态输出
+    AT+DEFAULT    恢复出厂设置
+*/
+
+
+
+// /* 发送 AT 指令：
+//    流程：拉高 EN→延时→发送命令→等待响应→拉低 EN
+//    resp_buf 可为 NULL；timeout_ms 超时；返回 BT_OK/BT_TIMEOUT */
+// BT_Status_t BT_SendAT(BT_Handle_t *hbt, const char *cmd,
+//                       char *resp_buf, uint16_t resp_len, uint32_t timeout_ms);
+
 
 #ifdef __cplusplus
 }

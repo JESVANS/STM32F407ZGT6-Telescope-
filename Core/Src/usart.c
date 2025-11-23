@@ -24,7 +24,35 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include "bluetooth.h"
 #define UART_PRINTF_BUF_SIZE 256
+
+
+char bt_disp_buf[128] = {0};
+uint8_t bt_has_new = 0;
+char bt_line_buf[128] = {0};
+uint8_t bt_line_idx = 0;
+
+/* ==== USARTx 中断收发相关（1/2/3 通用） ==== */
+
+/* USART1 */
+volatile uint8_t  uart1_tx_done = 0;
+volatile uint8_t  uart1_rx_done = 0;
+uint8_t           uart1_rx_buf[UART_IT_RX_BUF_SIZE];
+uint16_t          uart1_rx_len = 0;
+
+/* USART2 */
+volatile uint8_t  uart2_tx_done = 0;
+volatile uint8_t  uart2_rx_done = 0;
+uint8_t           uart2_rx_buf[UART_IT_RX_BUF_SIZE];
+uint16_t          uart2_rx_len = 0;
+
+/* USART3 */
+volatile uint8_t  uart3_tx_done = 0;
+volatile uint8_t  uart3_rx_done = 0;
+uint8_t           uart3_rx_buf[UART_IT_RX_BUF_SIZE];
+uint16_t          uart3_rx_len = 0;
+
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -143,6 +171,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+    /* USART1 interrupt Init */
+    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
   /* USER CODE BEGIN USART1_MspInit 1 */
 
   /* USER CODE END USART1_MspInit 1 */
@@ -167,6 +198,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+    /* USART2 interrupt Init */
+    HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(USART2_IRQn);
   /* USER CODE BEGIN USART2_MspInit 1 */
 
   /* USER CODE END USART2_MspInit 1 */
@@ -191,6 +225,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+    /* USART3 interrupt Init */
+    HAL_NVIC_SetPriority(USART3_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(USART3_IRQn);
   /* USER CODE BEGIN USART3_MspInit 1 */
 
   /* USER CODE END USART3_MspInit 1 */
@@ -214,6 +251,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
     */
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_9|GPIO_PIN_10);
 
+    /* USART1 interrupt Deinit */
+    HAL_NVIC_DisableIRQ(USART1_IRQn);
   /* USER CODE BEGIN USART1_MspDeInit 1 */
 
   /* USER CODE END USART1_MspDeInit 1 */
@@ -232,6 +271,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
     */
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_2|GPIO_PIN_3);
 
+    /* USART2 interrupt Deinit */
+    HAL_NVIC_DisableIRQ(USART2_IRQn);
   /* USER CODE BEGIN USART2_MspDeInit 1 */
 
   /* USER CODE END USART2_MspDeInit 1 */
@@ -250,6 +291,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
     */
     HAL_GPIO_DeInit(GPIOB, GPIO_PIN_10|GPIO_PIN_11);
 
+    /* USART3 interrupt Deinit */
+    HAL_NVIC_DisableIRQ(USART3_IRQn);
   /* USER CODE BEGIN USART3_MspDeInit 1 */
 
   /* USER CODE END USART3_MspDeInit 1 */
@@ -297,5 +340,108 @@ HAL_StatusTypeDef UART_ReceiveCharEx(UART_HandleTypeDef *huart, uint8_t *ch, uin
 {
     if (!huart || !ch) return HAL_ERROR;
     return HAL_UART_Receive(huart, ch, 1, timeout);
+}
+
+/* 阻塞发送任意数据（USART2） */
+HAL_StatusTypeDef UART2_IT_Send(const uint8_t *data, uint16_t len)
+{
+    if (!data || !len) return HAL_ERROR;
+    uart2_tx_done = 0;
+    return HAL_UART_Transmit_IT(&huart2, (uint8_t *)data, len);
+}
+
+/* ====== 通用中断发送 ====== */
+HAL_StatusTypeDef UART_IT_Send(UART_HandleTypeDef *huart, const uint8_t *data, uint16_t len)
+{
+    if (!huart || !data || !len) return HAL_ERROR;
+
+    if (huart->Instance == USART1) {
+        uart1_tx_done = 0;
+    } else if (huart->Instance == USART2) {
+        uart2_tx_done = 0;
+    } else if (huart->Instance == USART3) {
+        uart3_tx_done = 0;
+    }
+
+    return HAL_UART_Transmit_IT(huart, (uint8_t *)data, len);
+}
+
+/* ====== 通用中断接收到固定长度 ====== */
+HAL_StatusTypeDef UART_IT_StartRecv(UART_HandleTypeDef *huart, uint16_t expect_len)
+{
+    if (!huart || expect_len == 0 || expect_len > UART_IT_RX_BUF_SIZE)
+        return HAL_ERROR;
+
+    if (huart->Instance == USART1) {
+        uart1_rx_done = 0;
+        uart1_rx_len  = expect_len;
+        return HAL_UART_Receive_IT(&huart1, uart1_rx_buf, expect_len);
+    } else if (huart->Instance == USART2) {
+        uart2_rx_done = 0;
+        uart2_rx_len  = expect_len;
+        return HAL_UART_Receive_IT(&huart2, uart2_rx_buf, expect_len);
+    } else if (huart->Instance == USART3) {
+        uart3_rx_done = 0;
+        uart3_rx_len  = expect_len;
+        return HAL_UART_Receive_IT(&huart3, uart3_rx_buf, expect_len);
+    }
+
+    return HAL_ERROR; // 其他 UART 暂未支持
+}
+
+/* 完成发送回调 */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) {
+        uart1_tx_done = 1;
+    } else if (huart->Instance == USART2) {
+        uart2_tx_done = 1;
+    } else if (huart->Instance == USART3) {
+        uart3_tx_done = 1;
+    }
+}
+
+/* 接收完成回调 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) {
+        uart1_rx_done = 1;
+        /* 数据已经在 uart1_rx_buf[0..uart1_rx_len-1] */
+    } else if (huart->Instance == USART2) {
+        uart2_rx_done = 1;
+        /* 数据在 uart2_rx_buf[0..uart2_rx_len-1] */
+    } else if (huart->Instance == USART3) {
+        uart3_rx_done = 1;
+        /* 数据在 uart3_rx_buf[0..uart3_rx_len-1] */
+    }
+
+    /* ===== 针对蓝牙（默认使用 USART2）的应用层钩子 ===== */
+    if (huart == BT_DEFAULT_UART) {
+        extern char bt_disp_buf[128];
+        extern uint8_t bt_has_new;
+
+        /* 这里我们是按 1 字节接收的 */
+        uint8_t ch = uart2_rx_buf[0];
+
+        if (ch == '\r') {
+            /* 忽略裸回车 */
+        } else if (ch == '\n') {
+            /* 一行结束，拷贝到显示缓冲 */
+            bt_line_buf[bt_line_idx] = '\0';
+            strncpy(bt_disp_buf, bt_line_buf, sizeof(bt_disp_buf) - 1);
+            bt_disp_buf[sizeof(bt_disp_buf) - 1] = '\0';
+            bt_has_new = 1;
+            bt_line_idx = 0;  // 清空，准备下一行
+        } else {
+            /* 普通字符，累加到当前行（防溢出） */
+            if (bt_line_idx < sizeof(bt_line_buf) - 1) {
+                bt_line_buf[bt_line_idx++] = (char)ch;
+            }
+        }
+
+        /* 继续下一次接收（按你期望长度，可改成固定 N 字节） */
+        UART_IT_StartRecv(huart, 1);
+    }
+
 }
 /* USER CODE END 1 */

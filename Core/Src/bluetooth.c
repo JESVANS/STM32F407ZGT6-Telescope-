@@ -67,8 +67,24 @@ BT_Status_t BT_Send(BT_Handle_t *hbt_in, const uint8_t *data, uint16_t len, uint
     if (HAL_GPIO_ReadPin(hbt->EN_Port, hbt->EN_Pin) == GPIO_PIN_SET)
         return BT_ERROR;
 
-    if (UART_SendEx(hbt->huart, data, len, timeout_ms) != HAL_OK)
+    /* 中断方式发送 */
+    if (UART_IT_Send(hbt->huart, data, len) != HAL_OK)
         return BT_ERROR;
+
+    uint32_t start = HAL_GetTick();
+    volatile uint8_t *tx_done_flag = NULL;
+
+    if (hbt->huart == &huart1)      tx_done_flag = &uart1_tx_done;
+    else if (hbt->huart == &huart2) tx_done_flag = &uart2_tx_done;
+    else if (hbt->huart == &huart3) tx_done_flag = &uart3_tx_done;
+
+    if (!tx_done_flag) return BT_ERROR;
+
+    while (!(*tx_done_flag)) {
+        if (HAL_GetTick() - start >= timeout_ms)
+            return BT_TIMEOUT;
+    }
+
     return BT_OK;
 }
 
@@ -77,63 +93,124 @@ BT_Status_t BT_Receive(BT_Handle_t *hbt_in, uint8_t *buf, uint16_t len, uint32_t
     BT_Handle_t *hbt = _handle(hbt_in);
     if (!hbt || !hbt->initialized || !buf || !len) return BT_INVALID;
 
-    if (UART_ReceiveEx(hbt->huart, buf, len, timeout_ms) != HAL_OK)
-        return BT_TIMEOUT;
+    if (len > UART_IT_RX_BUF_SIZE) return BT_INVALID;
+
+    if (UART_IT_StartRecv(hbt->huart, len) != HAL_OK)
+        return BT_ERROR;
+
+    uint32_t start = HAL_GetTick();
+    volatile uint8_t *rx_done_flag = NULL;
+    uint8_t *src_buf = NULL;
+
+    if (hbt->huart == &huart1) {
+        rx_done_flag = &uart1_rx_done;
+        src_buf      = uart1_rx_buf;
+    } else if (hbt->huart == &huart2) {
+        rx_done_flag = &uart2_rx_done;
+        src_buf      = uart2_rx_buf;
+    } else if (hbt->huart == &huart3) {
+        rx_done_flag = &uart3_rx_done;
+        src_buf      = uart3_rx_buf;
+    }
+
+    if (!rx_done_flag || !src_buf) return BT_ERROR;
+
+    while (!(*rx_done_flag)) {
+        if (HAL_GetTick() - start >= timeout_ms)
+            return BT_TIMEOUT;
+    }
+
+    memcpy(buf, src_buf, len);
     return BT_OK;
 }
 
-/* 等待 AT 响应：简单按字节读取到 '\n' 或满缓冲/超时 */
-static BT_Status_t _wait_resp(BT_Handle_t *hbt, char *resp, uint16_t resp_len, uint32_t timeout_ms)
-{
-    if (!resp || resp_len < 2) {
-        /* 若不需要响应内容，只延时等待 */
-        HAL_Delay(timeout_ms);
-        return BT_OK;
-    }
+// /* 等待 AT 响应：一次性中断接收若干字节，在缓冲中找 '\n' */
+// static BT_Status_t _wait_resp(BT_Handle_t *hbt, char *resp, uint16_t resp_len, uint32_t timeout_ms)
+// {
+//     if (!resp || resp_len < 2) {
+//         HAL_Delay(timeout_ms);
+//         return BT_OK;
+//     }
 
-    uint32_t start = HAL_GetTick();
-    uint16_t idx = 0;
-    while ((HAL_GetTick() - start) < timeout_ms) {
-        uint8_t ch;
-        if (UART_ReceiveEx(hbt->huart, &ch, 1, 5) == HAL_OK) {
-            if (idx < (resp_len - 1)) {
-                resp[idx++] = (char)ch;
-            }
-            if (ch == '\n') break; /* 行结束 */
-        }
-    }
-    resp[idx] = '\0';
-    return (idx == 0) ? BT_TIMEOUT : BT_OK;
-}
+//     uint16_t max_len = (resp_len - 1);
+//     if (max_len > UART_IT_RX_BUF_SIZE) max_len = UART_IT_RX_BUF_SIZE;
 
-BT_Status_t BT_SendAT(BT_Handle_t *hbt_in, const char *cmd,
-                      char *resp_buf, uint16_t resp_len, uint32_t timeout_ms)
-{
-    BT_Handle_t *hbt = _handle(hbt_in);
-    if (!hbt || !hbt->initialized || !cmd) return BT_INVALID;
+//     if (UART_IT_StartRecv(hbt->huart, max_len) != HAL_OK)
+//         return BT_ERROR;
 
-    /* 进入 AT 模式：拉高 EN（模块会断开连接进入指令模式） */
-    while (HAL_GPIO_ReadPin(hbt->EN_Port, hbt->EN_Pin) == GPIO_PIN_RESET)
-    {
-        HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_SET);
-    }
+//     uint32_t start = HAL_GetTick();
+//     volatile uint8_t *rx_done_flag = NULL;
+//     uint8_t *src_buf = NULL;
+//     uint16_t rx_len = 0;
+
+//     if (hbt->huart == &huart1) {
+//         rx_done_flag = &uart1_rx_done;
+//         src_buf      = uart1_rx_buf;
+//         rx_len       = uart1_rx_len;
+//     } else if (hbt->huart == &huart2) {
+//         rx_done_flag = &uart2_rx_done;
+//         src_buf      = uart2_rx_buf;
+//         rx_len       = uart2_rx_len;
+//     } else if (hbt->huart == &huart3) {
+//         rx_done_flag = &uart3_rx_done;
+//         src_buf      = uart3_rx_buf;
+//         rx_len       = uart3_rx_len;
+//     }
+
+//     if (!rx_done_flag || !src_buf) return BT_ERROR;
+
+//     while (!(*rx_done_flag)) {
+//         if (HAL_GetTick() - start >= timeout_ms)
+//             return BT_TIMEOUT;
+//     }
+
+//     /* 此时 src_buf[0..rx_len-1] 是收到的 AT 响应数据 */
+//     uint16_t copy_len = (rx_len < max_len) ? rx_len : max_len;
+//     memcpy(resp, src_buf, copy_len);
+//     resp[copy_len] = '\0';
+//     return (copy_len == 0) ? BT_TIMEOUT : BT_OK;
+// }
 
 
-    /* 直接阻塞发送 AT 命令（保证顺序） */
-    if (HAL_UART_Transmit(hbt->huart, (uint8_t*)cmd, (uint16_t)strlen(cmd), 1000) != HAL_OK) {
-        HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_SET);
-        return BT_ERROR;
-    }
+/*AT+VERSION 查询版本 
+    AT+RESET    复位 
+    AT+DISC    断开连接
+    AT+LADDR    查询MAC地址
+    AT+BAUD<Param>  AT+BAUD    波特率设置/查询 Param:4=9600,5=19200,6=38400,7=57600,8=115200,9=128000
+    AT+PIN<Param>  AT+PIN    蓝牙配对密码设置/查询 Param:4位数字密码，如 AT+PIN1234
+    AT+NAME<Param>  AT+NAME    广播名设置/查询  Param: BLE 广播名(最长:18字节) ，如 AT+NAMEMyBTDevice
+    AT+ENLOG<Param>  AT+ENLOG    串口状态输出使能设置/查询  1:打开串口状态输出
+    AT+DEFAULT    恢复出厂设置
+*/
 
-    /* 等待响应 */
-    BT_Status_t st = _wait_resp(hbt, resp_buf, resp_len, timeout_ms);
+// BT_Status_t BT_SendAT(BT_Handle_t *hbt_in, const char *cmd,
+//                       char *resp_buf, uint16_t resp_len, uint32_t timeout_ms)
+// {
+//     BT_Handle_t *hbt = _handle(hbt_in);
+//     if (!hbt || !hbt->initialized || !cmd) return BT_INVALID;
 
-    /* 退出 AT 模式，恢复透传 */
-    HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_RESET);
-    HAL_Delay(20);
+//     /* 进入 AT 模式：拉高 EN（模块会断开连接进入指令模式） */
+//     while (HAL_GPIO_ReadPin(hbt->EN_Port, hbt->EN_Pin) == GPIO_PIN_RESET)
+//     {
+//         HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_SET);
+//         HAL_Delay(50);
+//     }
 
-    return st;
-}
+//     /* 直接使用中断封装的 BT_Send 发送 AT 命令 */
+//     if (BT_Send(hbt, (const uint8_t*)cmd, (uint16_t)strlen(cmd), 1000) != BT_OK) {
+//         HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_RESET);
+//         return BT_ERROR;
+//     }
+
+//     /* 等待响应（中断接收） */
+//     BT_Status_t st = _wait_resp(hbt, resp_buf, resp_len, timeout_ms);
+
+//     /* 退出 AT 模式，恢复透传 */
+//     HAL_GPIO_WritePin(hbt->EN_Port, hbt->EN_Pin, GPIO_PIN_RESET);
+//     HAL_Delay(20);
+
+//     return st;
+// }
 
 BT_ConnState_t BT_GetState(BT_Handle_t *hbt_in)
 {

@@ -65,15 +65,15 @@
   static volatile uint8_t  bt_rx_byte;      /* 单字节中断接收缓冲 */
   static volatile uint16_t resp_len = 0;
   static volatile uint8_t  resp_updated = 0;
-  const char *msg = "Hello from STM32!\r\n";
+  const char *msg = "AT+DISC\r\n";
   char resp[128];
   
-  static char key_evt_buf[32] = "";
+  static char key_evt_buf[32] = {0};
 
-  static char g_tx_hex_str[128];
-  static char g_rx_hex_str[128];
-  static char g_decoded_str[128];
-  static uint8_t g_show_ln33 = 0;  // 是否当前有显示 3 行
+/* 用来显示蓝牙消息的缓冲区 */
+extern char bt_disp_buf[128];             // 屏幕显示用的缓冲
+extern uint8_t bt_has_new;                 // 标记是否有新消息待显示
+extern uint8_t bt_line_idx;               // 当前行缓冲索引
 
 
 /* USER CODE END PV */
@@ -311,6 +311,31 @@ static void bytes_to_hex_str(const uint8_t *buf, uint16_t len, char *out, uint16
     if (pos < out_size) out[pos] = '\0';
 }
 
+/* 屏幕中间显示蓝牙消息（居中显示） */
+static void LCD_ShowBTMessageCenter(const char *s)
+{
+    if (!s) return;
+
+    /* 根据你屏幕的实际分辨率调整这些数字 */
+    uint16_t screen_w = lcddev.width;
+    uint16_t screen_h = lcddev.height;
+
+    uint16_t char_w = 16;  // 如用 16x16 字体
+    uint16_t char_h = 24;  // 行高可适当大一点
+
+    uint16_t len = strlen(s);
+    if (len > (screen_w / char_w)) {
+        len = screen_w / char_w;
+    }
+
+    uint16_t text_w = len * char_w;
+    uint16_t x = (screen_w - text_w) / 2;
+    uint16_t y = (screen_h - char_h) / 2;   // 垂直居中
+
+    /* 先清除一条中间区域，再画字 */
+    lcd_fill(0, y, screen_w - 1, y + char_h + 4, BLACK);
+    lcd_show_string(x, y, text_w, char_h, 16, (char*)s, WHITE);
+}
 
 /* USER CODE END PFP */
 
@@ -368,6 +393,7 @@ int main(void)
   int number = 0;
 
   BT_Init(NULL);
+  UART_IT_StartRecv(hBluetooth.huart, 1);
   HC_SR04_Init(GPIOG, GPIO_PIN_6, GPIOG, GPIO_PIN_7, GPIO_NOPULL);
   KEY_Init();
 
@@ -421,9 +447,7 @@ int main(void)
     BH1750_SetMode(0x21); 
 
 
-  /* 发送一次（进入透传时 EN 需为低，BT_Init 已拉低） */
-  BT_Send(NULL, (const uint8_t*)msg, (uint16_t)strlen(msg), 200);
-  HAL_UART_Receive_IT(BT_DEFAULT_UART, (uint8_t*)&bt_rx_byte, 1);   /* 开始中断逐字节接收 */
+
 
 
 
@@ -446,17 +470,9 @@ int main(void)
           // 根据 ev.id 和 ev.type 做处理
           show_key_event(&ev);
         
-          /* 单击“下键”清除刚刚 3 行显示 */
+          /* 单击“下键”清除显示 */
           if (ev.id == KEY_DOWN && ev.type == KEY_EVT_RELEASE) {
-              if (g_show_ln33) {
-                        uint16_t line_h = 16;
-                        uint16_t total_h = line_h * 3;
-                        uint16_t y0 = (lcddev.height > total_h) ?
-                                      (lcddev.height - total_h) / 2 : 0;
-                        lcd_fill(0, y0, lcddev.width - 1,
-                                 y0 + total_h - 1, BLACK);
-                        g_show_ln33 = 0;
-                }
+              
             }     
         }
     }
@@ -477,21 +493,20 @@ int main(void)
             T = -1; H = -1;
             HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_10);
         }
-        if (BT_GetState(NULL) == BT_CONNECTED)
-        {
-            //BT_Send(NULL, (const uint8_t*)msg, (uint16_t)strlen(msg), 200);
-            //BT_SendAT(NULL, "AT+VERSION\r\n", NULL, 0, 500);
-        }
         BMP280_ReadTempPressure(&T, &P);
         A = (int)BMP280_CalcAltitude(P, 101325.0f);
         BH1750_ReadLux(&L);
         HC_SR04_Measure(NULL, &D);
+        //BT_Send(&hBluetooth, (const uint8_t*)msg, strlen(msg), 500);
+        //BT_SendAT(&hBluetooth, "AT+VERSION\r\n", NULL, 0, 1000);
+        
     }
 
-     if (resp_updated)   /* 有新完整消息 */
+
+    if (bt_has_new)
     {
-      resp_updated = 0;
-      lcd_show_string(0, 0, 240, 16, 16, resp, g_point_color);
+        bt_has_new = 0;
+        LCD_ShowBTMessageCenter(bt_disp_buf);   // 屏幕显示收到的内容
     }
 		
      
@@ -513,17 +528,17 @@ int main(void)
 
     
 
-    ssd1306_WriteInt(0, 16, number);
-    ssd1306_WriteString(0, 32, "Temp:  C");
-    ssd1306_WriteString(0, 48, "Humi:  %");
-    ssd1306_WriteInt(30, 32, T);
-    ssd1306_WriteInt(30, 48, H);
-    ssd1306_WriteString(70, 16, "   lx");
-    ssd1306_WriteInt(70, 16, (int)L);
-    ssd1306_WriteString(70, 32, "     Pa");
-    ssd1306_WriteString(70, 48, "   m");
-    ssd1306_WriteInt(70, 32, P);
-    ssd1306_WriteInt(70, 48, D);
+    // ssd1306_WriteInt(0, 16, number);
+    // ssd1306_WriteString(0, 32, "Temp:  C");
+    // ssd1306_WriteString(0, 48, "Humi:  %");
+    // ssd1306_WriteInt(30, 32, T);
+    // ssd1306_WriteInt(30, 48, H);
+    // ssd1306_WriteString(70, 16, "   lx");
+    // ssd1306_WriteInt(70, 16, (int)L);
+    // ssd1306_WriteString(70, 32, "     Pa");
+    // ssd1306_WriteString(70, 48, "   m");
+    // ssd1306_WriteInt(70, 32, P);
+    // ssd1306_WriteInt(70, 48, D);
     
     
     
@@ -595,40 +610,7 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart == BT_DEFAULT_UART)
-  {
-    uint8_t c = bt_rx_byte;
 
-    if (c == '\r' || c == '\n')
-    {
-      if (resp_len > 0)           /* 结束一条消息 */
-      {
-        resp[resp_len] = '\0';
-        resp_updated = 1;
-        resp_len = 0;
-      }
-    }
-    else
-    {
-      if (resp_len < sizeof(resp) - 1)
-      {
-        resp[resp_len++] = (char)c;
-      }
-      else
-      {
-        /* 缓冲满：强制终止并标记更新 */
-        resp[resp_len] = '\0';
-        resp_updated = 1;
-        resp_len = 0;
-      }
-    }
-
-    /* 继续接收下一个字节 */
-    HAL_UART_Receive_IT(BT_DEFAULT_UART, (uint8_t*)&bt_rx_byte, 1);
-  }
-}
 
 /* USER CODE END 4 */
 

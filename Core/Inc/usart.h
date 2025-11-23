@@ -57,6 +57,42 @@ HAL_StatusTypeDef UART_PrintfEx(UART_HandleTypeDef *huart, const char *fmt, ...)
 HAL_StatusTypeDef UART_ReceiveEx(UART_HandleTypeDef *huart, uint8_t *buf, uint16_t len, uint32_t timeout);
 HAL_StatusTypeDef UART_ReceiveCharEx(UART_HandleTypeDef *huart, uint8_t *ch, uint32_t timeout);/* 接收单字符 */
 
+/*** 通用中断收发支持：USART1 / USART2 / USART3 ***/
+#define UART_IT_RX_BUF_SIZE 256
+
+/* 每个串口一套状态变量 */
+
+/* USART1 */
+extern volatile uint8_t  uart1_tx_done;
+extern volatile uint8_t  uart1_rx_done;
+extern uint8_t           uart1_rx_buf[UART_IT_RX_BUF_SIZE];
+extern uint16_t          uart1_rx_len;
+
+/* USART2 */
+extern volatile uint8_t  uart2_tx_done;
+extern volatile uint8_t  uart2_rx_done;
+extern uint8_t           uart2_rx_buf[UART_IT_RX_BUF_SIZE];
+extern uint16_t          uart2_rx_len;
+
+/* USART3 */
+extern volatile uint8_t  uart3_tx_done;
+extern volatile uint8_t  uart3_rx_done;
+extern uint8_t           uart3_rx_buf[UART_IT_RX_BUF_SIZE];
+extern uint16_t          uart3_rx_len;
+
+/* 启动一次中断发送（传入任意 UART） */
+HAL_StatusTypeDef UART_IT_Send(UART_HandleTypeDef *huart, const uint8_t *data, uint16_t len);
+
+/* 启动一次中断接收到固定长度（传入任意 UART） */
+HAL_StatusTypeDef UART_IT_StartRecv(UART_HandleTypeDef *huart, uint16_t expect_len);
+// 启动：UART_IT_StartRecv(&huart1, 20);
+// 轮询：if (uart1_rx_done) { 使用 uart1_rx_buf / uart1_rx_len }
+
+/// 或 ///
+
+// 启动：UART_IT_StartRecv(&huart3, 50);
+// 轮询：if (uart3_rx_done) { 使用 uart3_rx_buf / uart3_rx_len }
+
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
