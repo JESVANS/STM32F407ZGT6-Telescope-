@@ -63,6 +63,17 @@
 
 /* USER CODE BEGIN PV */
 
+  float T = 0;
+  float H = 0;
+  float L = 0;
+  float P = 0;
+  float A = 0;
+  float D = 0;
+
+
+
+
+
   static volatile uint8_t  bt_rx_byte;      /* 单字节中断接收缓冲 */
   static volatile uint16_t resp_len = 0;
   static volatile uint8_t  resp_updated = 0;
@@ -79,6 +90,25 @@
 extern char disp_buf[128];             // 屏幕显示用的缓冲
 extern uint8_t bt_line_idx;               // 当前行缓冲索引
 extern uint8_t usart2_has_new;                 // 标记是否有新消息待显示
+
+enum Page
+{
+  showdata = 1,
+  network,
+  draw,
+  home,
+}; 
+enum Page current_page = home;
+enum Operation
+{
+  n_opt = 0,
+  yes,
+  up,
+  down,
+  left,
+  right,
+};
+enum Operation current_opt = n_opt;
 
 
 /* USER CODE END PV */
@@ -296,10 +326,107 @@ static void show_key_event(const KeyEvent_t *ev)
     key_id_to_str(ev->id), key_type_to_str(ev->type));
     
     /* 清除显示区域 (根据实际屏幕宽度调整) */
-    lcd_fill(120, 700, 340, 732, BLACK);
-    lcd_show_string(120, 700, 220, 32, 32, key_evt_buf, CYAN);
+    lcd_fill(200, 760, 420, 790, BLACK);
+    lcd_show_string(200, 760, 220, 32, 32, key_evt_buf, CYAN);
 }
 
+
+
+void ui(){
+  
+  switch (current_page)
+  {
+  case home:
+  LCD_ShowImage(85, 10, 310, 70, "logo_cdtu");
+  //LCD_ShowImage(85, 30, 230, 60, "logo_cdtu2");
+  lcd_fill(0, 90, 480, 800, GRAYBLUE);
+  lcd_fill(85, 200, 395, 300, RGB565_color(25, 50, 5));
+  lcd_fill(85, 350, 395, 450, RGB565_color(25, 50, 5));
+  lcd_fill(85, 500, 395, 600, RGB565_color(25, 50, 5));
+  lcd_fill(85, 650, 395, 750, RGB565_color(25, 50, 5));
+  lcd_draw_rectangle(85, 200, 395, 300, RED);
+    
+  lcd_show_string(160, 230, 310, 100, 32, "ShowData", MAGENTA);
+  lcd_show_string(160, 380, 310, 100, 32, "NetWork", MAGENTA);
+  lcd_show_string(160, 530, 310, 100, 32, "Draw", MAGENTA);
+  
+  break;
+  case showdata:
+    LCD_ShowImage(85, 10, 310, 70, "logo_cdtu");
+    lcd_fill(0, 90, 480, 800, GRAYBLUE);
+    lcd_show_string(64, 100, 160, 32, 32,"Temp:   C", MAGENTA);
+    lcd_show_string(64, 150, 160, 32, 32, "Humi:   %", MAGENTA);
+    lcd_show_string(64, 200, 220, 32, 32, "PRESS:      Pa", MAGENTA);
+    lcd_show_string(64, 250, 160, 32, 32, "ALTI:    m", MAGENTA);
+    lcd_show_string(64, 300, 220, 32, 32, "LIGHT:      lx", MAGENTA);
+    lcd_show_string(64, 350, 220, 32, 32, "DIST:    cm", MAGENTA);
+
+    
+
+    break;
+  case network:
+
+    break;
+  case draw:
+
+    break;
+
+  default:
+    break;
+  }
+
+}
+
+uint8_t num = 1;
+
+void select()
+{
+  uint8_t start_x =85;
+  uint8_t start_y = 200;
+  switch (current_opt)
+  {
+  case up:
+    current_opt = n_opt;
+    lcd_draw_rectangle(85, 200 + 150 * (num - 1), 395, 300 + 150 * (num - 1), RGB565_color(25, 50, 5));
+    num--;
+    break;
+  case down:
+    current_opt = n_opt;
+    lcd_draw_rectangle(85, 200 + 150 * (num - 1), 395, 300 + 150 * (num - 1), RGB565_color(25, 50, 5));
+    num++;
+    break;
+  case yes:
+    current_opt = n_opt;
+    lcd_clear(BLACK);
+    switch (num)
+    {
+    case 1:
+      current_page = showdata;
+      ui();
+      return;
+    case 2:
+      current_page = network;
+      return;
+    case 3:
+      current_page = draw;
+      return; 
+    case 4:
+      current_page = home;
+      //ui();
+      return;
+    
+    default:
+      return;
+    }
+
+  default:
+    break;
+  }
+  if(num < 1) num = 4;
+  if(num > 4) num = 1;
+  lcd_draw_rectangle(85, 200 + 150 * (num - 1), 395, 300 + 150 * (num - 1), RED);
+
+}
 
 
 /* 屏幕中间显示蓝牙消息（居中显示） */
@@ -395,39 +522,9 @@ int main(void)
   DL_LN33_InitIT();
 
 
-
-  HC_SR04_Init(GPIOG, GPIO_PIN_6, GPIOG, GPIO_PIN_7, GPIO_NOPULL);
   KEY_Init();
 
-  
-
-    float T = 10;
-    float H = 10;
-    float L = 0;
-    float P = 0;
-    float A = 0;
-    float D = 0;
-
-
-
-
-
-    LCD_ShowImage(85, 30, 310, 70, "logo_cdtu");
-    //LCD_ShowImage(85, 30, 230, 60, "logo_cdtu2");
-
-    lcd_show_string(64, 32, 160, 32, 32,"Temp:   C", MAGENTA);
-    // lcd_show_string(0,48,160,16,16,"Humi:    %", MAGENTA);
-    lcd_show_string(64, 64, 160, 32, 32, "Humi:   %", MAGENTA);
-    lcd_show_string(64, 96, 220, 32, 32, "PRESS:      Pa", MAGENTA);
-    lcd_show_string(64, 128, 160, 32, 32, "ALTI:    m", MAGENTA);
-    lcd_show_string(64, 160, 220, 32, 32, "LIGHT:      lx", MAGENTA);
-    lcd_show_string(64, 192, 220, 32, 32, "DIST:    cm", MAGENTA);
-
-    lcd_fill(85, 200, 395, 270, YELLOW);
-
-
-
-    if(SHT30_Check())
+  if(SHT30_Check())
     {
       SHT30_Read_SingleShot(&T, &H);
     }
@@ -454,6 +551,8 @@ int main(void)
     BH1750_Reset();
     BH1750_SetMode(0x21); 
 
+    HC_SR04_Init(GPIOG, GPIO_PIN_6, GPIOG, GPIO_PIN_7, GPIO_NOPULL);
+    
 
 
 
@@ -462,6 +561,7 @@ int main(void)
 
 
 
+  ui();
 
   /* USER CODE END 2 */
 
@@ -469,34 +569,43 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-    
     static uint32_t prev = 0;
-    if (HAL_GetTick() - prev >= 10) {
+    if (HAL_GetTick() - prev >= 10)
+    {
         prev = HAL_GetTick();
         KEY_Update();
         KeyEvent_t ev;
-        while (KEY_GetEvent(&ev)) {
+        while (KEY_GetEvent(&ev))
+        {
           // 根据 ev.id 和 ev.type 做处理
           show_key_event(&ev);
-        
-          /* 单击“下键” */
+
+          if(ev.id == KEY_UP && ev.type == KEY_EVT_RELEASE) {
+            current_opt = up;
+            select();
+          }
           if (ev.id == KEY_DOWN && ev.type == KEY_EVT_RELEASE) {
-                 
+            current_opt = down;
+            select();
+          }
+          if(ev.id == KEY_OK && ev.type == KEY_EVT_RELEASE){
+            current_opt = yes;
+            select();
+          }
         }
-      }
     }
-
-
-
-
     
-
     
-        
     static uint32_t tick_prev = 0;
-    if (HAL_GetTick() - tick_prev >= 1000)
+    if (HAL_GetTick() - tick_prev >= 1200)
     {
+
+        T = 0;
+        H = 0;
+        L = 0;
+        P = 0;
+        A = 0;
+        D = 0;
         tick_prev = HAL_GetTick();
         if (SHT30_Read_SingleShot(&T, &H) != 0)
         {
@@ -515,6 +624,26 @@ int main(void)
        uint16_t frame_len = 0;
        DL_LN33_BuildFrame(DL_LOCAL_PORT, 0x90, 0xbd1d, content, sizeof(content), &frame, &frame_len);
        //DL_LN33_SendFrameIT(DL_LN33_DEFAULT_UART, frame, frame_len);
+
+
+
+
+       if(current_page == showdata)
+      {
+        lcd_fill(150, 100, 180, 132, GRAYBLUE); 
+        lcd_fill(150, 150, 180, 182, GRAYBLUE);
+        lcd_fill(170, 200, 250, 232, GRAYBLUE);
+        lcd_fill(150, 250, 200, 282, GRAYBLUE);
+        lcd_fill(170, 300, 250, 332, GRAYBLUE);
+        lcd_fill(150, 350, 220, 382, GRAYBLUE);
+      
+        lcd_show_xnum(150, 100, T, 2, 32, 1, MAGENTA);
+        lcd_show_xnum(150, 150, H, 2, 32, 1, MAGENTA);
+        lcd_show_xnum(170, 200, P, 5, 32, 1, MAGENTA);
+        lcd_show_xnum(150, 250, A, 3, 32, 1, MAGENTA);
+        lcd_show_xnum(170, 300, L, 5, 32, 1, MAGENTA);
+        lcd_show_xnum(150, 350, D, 3, 32, 1, MAGENTA);
+      }
 
 
     } 
@@ -541,7 +670,7 @@ int main(void)
         LCD_ShowBTMessageCenter(disp_buf);   // 屏幕显示收到的内容
     }
 		
-     
+    
 
 
     
@@ -550,12 +679,7 @@ int main(void)
 
     
 
-    lcd_show_xnum(150, 32, T, 2, 32, 0, MAGENTA);
-    lcd_show_xnum(150, 64, H, 2, 32, 0, MAGENTA);
-    lcd_show_xnum(170, 96, P, 5, 32, 0, MAGENTA);
-    lcd_show_xnum(150, 128, A, 3, 32, 0, MAGENTA);
-    lcd_show_xnum(170, 160, L, 5, 32, 0, MAGENTA);
-    lcd_show_xnum(150, 192, D, 3, 32, 0, MAGENTA);
+    
 
 
     
@@ -608,10 +732,7 @@ int main(void)
         }
 
        HAL_Delay(5);
-        i++;
-        if (i % 20 == 0) HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9); /* 每100ms翻转一次LED */
-    
-
+       
 
 
    
